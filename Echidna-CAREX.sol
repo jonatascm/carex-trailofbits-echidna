@@ -9,6 +9,9 @@ contract Test {
     int128 internal two = ABDKMath64x64.fromInt(2);
     int128 internal oneNegative = ABDKMath64x64.fromInt(-1);
 
+    int128 internal constant MIN_64x64 = -0x80000000000000000000000000000000;
+    int128 internal constant MAX_64x64 = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+
     event Value(string, int256);
 
     /*
@@ -102,6 +105,11 @@ contract Test {
         return ABDKMath64x64.fromUInt(x);
     }
 
+    function toIntRoundToZero(int128 x) public returns (int64) {
+        if (x >= 0) return ABDKMath64x64.toInt(x);
+        else return -ABDKMath64x64.toInt(neg(x));
+    }
+
     /*
      * End wrapper functions
      */
@@ -141,14 +149,32 @@ contract Test {
         int128 yMulX = mul(y, x);
         assert(xMulY == yMulX);
 
-        int128 xMul0 = mul(x, 0);
-        assert(xMul0 == 0);
+        int128 absMul = abs(xMulY);
+        int128 absX = abs(x);
+        int128 absY = abs(y);
 
-        int128 xMulOne = mul(x, one);
-        assert(xMulOne == x);
-
-        int128 xMulOneNegative = mul(x, oneNegative);
-        assert(xMulOneNegative == sub(0, x));
+        if (x == zero || y == zero) {
+            assert(xMulY == 0);
+        } else if (absX >= one) {
+            //x >= 1
+            if (absY >= one) {
+                assert(absMul >= absX);
+                assert(absMul >= absY);
+            } else {
+                assert(absMul <= absX);
+                assert(absMul >= absY);
+            }
+        } else {
+            // 0 < x < 1
+            if (absY >= one) {
+                // y > 0
+                assert(absMul >= absX);
+                assert(absMul <= absY);
+            } else {
+                assert(absMul <= absX);
+                assert(absMul <= absY);
+            }
+        }
     }
 
     /*
@@ -226,7 +252,7 @@ contract Test {
      * Panic(1)
      * Value("xAvgY", -1)
      * Value("(X+Y)/2", 0)
-     * Issue caused by precision loss in calculating
+     * Issue caused by precision loss in calculating because of rounding down
      */
     function testAvg(int128 x, int128 y) public {
         int128 xAvgY = avg(x, y);
@@ -282,7 +308,7 @@ contract Test {
      * Panic(1)
      * Value("xSqrtY", 6074000999)
      * Value("xPow", 1)
-     * Issue caused by precision loss in calculating
+     * Issue caused by precision loss in calculating because of rounding down
      */
     function testSqrt(int128 x) public {
         int128 xSqrtY = sqrt(x);
@@ -366,14 +392,24 @@ contract Test {
      * @audit success
      */
     function testMuli(int128 x, int256 y) public {
-        int256 xMuli0 = muli(x, 0);
-        assert(xMuli0 == 0);
+        int256 xMuliY = muli(x, y);
+        int256 xInt = int256(toIntRoundToZero(x));
 
-        int256 xMuliOne = muli(x, one);
-        assert(xMuliOne == x);
-
-        int256 xMuliOneNegative = muli(x, oneNegative);
-        assert(xMuliOneNegative == sub(0, x));
+        if (x == 0 || y == 0) {
+            assert(xMuliY == 0);
+        } else if (x > zero) {
+            if (y > 0) {
+                assert(xMuliY >= xInt);
+            } else {
+                assert(-xMuliY >= xInt);
+            }
+        } else {
+            if (y > 0) {
+                assert(xMuliY <= xInt);
+            } else {
+                assert(xMuliY >= -xInt);
+            }
+        }
     }
 
     /*
@@ -383,14 +419,19 @@ contract Test {
      * @audit success
      */
     function testMulu(int128 x, uint256 y) public {
-        int256 xMuli0 = muli(x, 0);
-        assert(xMuli0 == 0);
+        uint256 xMuluY = mulu(x, y);
+        int128 absX = abs(x);
+        uint256 xInt = uint256(int256(toIntRoundToZero(absX)));
 
-        int256 xMuliOne = muli(x, one);
-        assert(xMuliOne == x);
-
-        int256 xMuliOneNegative = muli(x, oneNegative);
-        assert(xMuliOneNegative == sub(0, x));
+        if (x == zero || y == 0) {
+            assert(xMuluY == 0);
+        } else if (x >= one) {
+            assert(xMuluY >= xInt);
+        } else {
+            if (y == 1) {
+                assert(xMuluY == xInt);
+            }
+        }
     }
 
     /*
@@ -400,17 +441,11 @@ contract Test {
      * @audit success
      */
     function testDivi(int256 x, int256 y) public {
-        int128 xDivOne = divi(x, 1);
-        int128 xInt = fromInt(x);
-
-        assert(xDivOne == xInt);
-
-        int128 zeroDivX = divi(0, x);
-        assert(zeroDivX == 0);
-
-        int128 xDivOneNegative = divi(x, -1);
-        int128 xNegInt = fromInt(-x);
-        assert(xDivOneNegative == xNegInt);
+        int128 xDivY = divi(x, y);
+        int256 divInt = toIntRoundToZero(xDivY);
+        if (x == 0) {
+            assert(xDivY == 0);
+        }
     }
 
     /*
@@ -442,18 +477,18 @@ contract Test {
      * Value("xGavgOne", 1)
      * Value("xMulY", 0)
      * Value("avg", 0)
-     * Issue caused by precision loss in calculating
+     * Issue caused by precision loss in calculating because of rounding down
      */
     function testGavg(int128 x, int128 y) public {
         int128 xGavgOne = gavg(x, y);
 
         int128 xMulY = mul(x, y);
-        int128 avg = sqrt(xMulY);
+        int128 resultAvg = sqrt(xMulY);
 
         emit Value("xGavgOne", xGavgOne);
         emit Value("xMulY", xMulY);
-        emit Value("avg", avg);
+        emit Value("resultAvg", resultAvg);
 
-        assert(xGavgOne == avg);
+        assert(xGavgOne == resultAvg);
     }
 }
